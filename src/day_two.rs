@@ -1,5 +1,6 @@
-use crate::inputs;
 use std::str::FromStr;
+
+use crate::inputs;
 
 #[derive(Debug)]
 struct CubeSet {
