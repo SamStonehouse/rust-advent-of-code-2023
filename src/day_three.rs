@@ -24,6 +24,7 @@ impl RawSchematic {
         }
     }
 
+    // Returns true if the given rect contains any of the provided characters
     fn rect_contains_chars(self: &Self, rect: &Rect, chars: &Vec<char>) -> bool {
         for col in rect.left..(rect.right + 1) {
             for row in rect.top..(rect.bottom + 1) {
@@ -120,37 +121,72 @@ impl RawSchematic {
     fn get_part_numbers(self: &Self) -> Vec<PartNumber> {
         self.find_part_number_candidates()
             .iter()
-            .filter(|candidate| {
-                println!(
-                    "{:?} - {:?}",
-                    candidate.value,
-                    self.candidate_valid(candidate)
-                );
-                self.candidate_valid(candidate)
-            })
+            .filter(|candidate| self.candidate_valid(candidate))
             .map(|candidate| PartNumber::from_candidate(candidate))
             .collect()
     }
 
-    fn get_part_proximity_map(self: &Self) {
-        let mut proximity_map: HashMap<String, PartNumber> = HashMap::new();
+    fn get_part_proximity_map(self: &Self) -> HashMap<String, Vec<PartNumber>> {
+        let mut proximity_map: HashMap<String, Vec<PartNumber>> = HashMap::new();
 
         self.get_part_numbers().iter().for_each(|part_number| {
-            println!("Add to hashmap");
-            // for col in rect.left..(rect.right + 1) {
-            //     for row in rect.top..(rect.bottom + 1) {
-            //         match self.is_char(col, row, chars) {
-            //             true => return true,
-            //             _ => (),
-            //         }
-            //     }
-            // }
+            let rect = part_number.get_outline().unwrap();
+            for col in rect.left..(rect.right + 1) {
+                for row in rect.top..(rect.bottom + 1) {
+                    let key = format!("{}-{}", col, row);
+                    if !proximity_map.contains_key(&key) {
+                        proximity_map.insert(key.clone(), vec![]);
+                    }
+
+                    let mut current = proximity_map.get(&key).unwrap().clone();
+                    current.push(part_number.clone());
+                    proximity_map.insert(key, current);
+                }
+            }
         });
+
+        proximity_map
     }
 
-    // fn get_gear_candidates(self: &Self) -> Vec<GearCandidate> {
-    //     // self.
-    // }
+    fn get_gear_candidates(self: &Self) -> Vec<GearCandidate> {
+        let mut candidates: Vec<GearCandidate> = Vec::new();
+        self.lines
+            .iter()
+            .enumerate()
+            .for_each(|(line_index, line)| {
+                line.chars().enumerate().for_each(|(index, char)| {
+                    if GEARS.contains(&char) {
+                        candidates.push(GearCandidate::new(line_index, index))
+                    }
+                })
+            });
+
+        candidates
+    }
+
+    fn get_gears(self: &Self) -> Vec<Gear> {
+        let proximity_map = self.get_part_proximity_map();
+        let candidates = self.get_gear_candidates();
+
+        candidates
+            .iter()
+            .flat_map(|candidate| {
+                let key = format!("{}-{}", candidate.column, candidate.row);
+                if !proximity_map.contains_key(&key) {
+                    return None;
+                } else {
+                    let part_numbers = proximity_map.get(&key).unwrap();
+                    if part_numbers.len() != 2 {
+                        return None;
+                    }
+
+                    Some(candidate.to_gear(
+                        part_numbers.get(0).unwrap().value * part_numbers.get(1).unwrap().value,
+                    ))
+                }
+            })
+            .collect::<Vec<Gear>>()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -238,43 +274,47 @@ impl PartNumber {
             value: candidate.value,
         }
     }
+
+    fn get_outline(self: &Self) -> Option<Rect> {
+        let i_start_row = isize::try_from(self.start_row).ok()?;
+        let i_start_col = isize::try_from(self.start_column).ok()?;
+        let i_length = isize::try_from(self.length).ok()?;
+
+        Some(Rect {
+            top: i_start_row - 1,
+            left: i_start_col - 1,
+            bottom: i_start_row + 1,
+            right: i_start_col + i_length,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
 struct GearCandidate {
     row: usize,
     column: usize,
-    value: u32,
 }
 
 impl GearCandidate {
-    fn new(row: usize, column: usize, value: u32) -> GearCandidate {
-        GearCandidate { row, column, value }
+    fn new(row: usize, column: usize) -> GearCandidate {
+        GearCandidate { row, column }
     }
 
-    // fn get_outline(self: &Self) -> Option<Outline> {
-    //     let i_start_row = isize::try_from(self.row).ok()?;
-    //     let i_start_col = isize::try_from(self.column).ok()?;
-
-    //     Some(Outline {
-    //         top: i_start_row - 1,
-    //         left: i_start_col - 1,
-    //         bottom: i_start_row + 1,
-    //         right: i_start_col + 1,
-    //     })
-    // }
+    fn to_gear(self: &Self, value: u32) -> Gear {
+        Gear::new(self.row, self.column, value)
+    }
 }
 
 #[derive(Debug, Clone)]
 struct Gear {
     row: usize,
     column: usize,
-    value: u32,
+    ratio: u32,
 }
 
 impl Gear {
-    fn new(row: usize, column: usize, value: u32) -> Gear {
-        Gear { row, column, value }
+    fn new(row: usize, column: usize, ratio: u32) -> Gear {
+        Gear { row, column, ratio }
     }
 }
 
@@ -299,10 +339,19 @@ pub(crate) fn part_one() {
         })
         .collect();
 
-    println!("{:?}", valid_schematic_values.iter().sum::<u32>());
+    println!(
+        "Sum of part numbers: {:?}",
+        valid_schematic_values.iter().sum::<u32>()
+    );
 }
 
 pub(crate) fn part_two() {
     println!("Day Three, Part Two");
     let lines = inputs::read_inputs_from_file("./inputs/day_three.txt").unwrap();
+    let schematic = RawSchematic::new(lines);
+    let valid_gears: Vec<Gear> = schematic.get_gears();
+    println!(
+        "Sum of gear ratios: {:?}",
+        valid_gears.iter().map(|gear| gear.ratio).sum::<u32>()
+    );
 }
