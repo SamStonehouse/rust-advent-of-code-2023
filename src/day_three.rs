@@ -96,7 +96,6 @@ impl RawSchematic {
                             None => {
                                 current_candidate =
                                     Some(PartNumberCandidate::new(line_index, index, 1, value));
-                                println!("{:?}", current_candidate);
                             }
                         }
                     } else {
